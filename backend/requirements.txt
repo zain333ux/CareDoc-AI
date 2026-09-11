@@ -1,0 +1,10 @@
+fastapi
+uvicorn
+langchain
+langchain-openai
+langchain-groq
+pinecone-client
+supabase
+pymupdf
+python-multipart
+pdfplumber
