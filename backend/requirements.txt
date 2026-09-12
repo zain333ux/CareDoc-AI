@@ -8,3 +8,4 @@ supabase
 pymupdf
 python-multipart
 pdfplumber
+python-dotenv
