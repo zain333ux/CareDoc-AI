@@ -242,7 +242,7 @@ export default function DocumentViewPage() {
                 {msg.citations && msg.citations.length > 0 && (
                   <div className="mt-2 pl-2 border-l-2 border-border">
                     <div className="text-[10px] font-mono uppercase text-muted-foreground mb-1 tracking-wider">Source</div>
-                    {msg.citations.map((cit, idx) => (
+                    {msg.citations.map((cit: string, idx: number) => (
                       <p key={idx} className="text-xs text-muted-foreground italic leading-snug">&quot;{cit}&quot;</p>
                     ))}
                   </div>
