@@ -3,7 +3,7 @@ uvicorn
 langchain
 langchain-openai
 langchain-groq
-pinecone-client
+pinecone
 supabase
 pymupdf
 python-multipart
