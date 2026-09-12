@@ -45,7 +45,7 @@ export default function DocumentViewPage() {
     setIsChatLoading(true);
     
     try {
-      const res = await fetch(`http://localhost:8000/documents/${documentId}/chat`, {
+      const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/documents/${documentId}/chat`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json"
