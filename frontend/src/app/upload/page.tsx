@@ -62,7 +62,7 @@ export default function UploadPage() {
       formData.append("doc_type", docType);
       formData.append("user_id", "test_user"); 
 
-      const res = await fetch("http://localhost:8000/documents/upload", {
+      const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/documents/upload`, {
         method: "POST",
         body: formData,
       });
