@@ -13,7 +13,8 @@ export default function RefreshRedirector() {
   useEffect(() => {
     if (!isAppInitialized) {
       // If this is the very first load and we are not on the root page, redirect to root
-      if (pathname !== "/") {
+      const savedDocument = pathname.startsWith("/document/") && localStorage.getItem(`doc_${pathname.split("/")[2]}`);
+      if (pathname !== "/" && !savedDocument) {
         router.replace("/");
       }
       isAppInitialized = true;

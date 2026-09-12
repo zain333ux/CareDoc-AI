@@ -15,7 +15,7 @@ async def extract_all(chunks: list[str]) -> ComprehensiveExtraction:
     context = "\n".join(chunks)
     parser = PydanticOutputParser(pydantic_object=ComprehensiveExtraction)
     prompt = ChatPromptTemplate.from_messages([
-        ("system", "You are a medical extraction agent. Extract all medications, follow-up instructions, and precautions from the provided document chunks. If any category is empty, return an empty list for it.\n{format_instructions}"),
+        ("system", "You are a medical extraction agent. Extract all medications, follow-up instructions, and precautions from the provided document chunks. Copy medication names, doses, duration, dates and provider names exactly from the source; do not convert units, reformat dates, or infer missing instructions. If any category is empty, return an empty list for it.\n{format_instructions}"),
         ("human", "Document Context:\n{context}")
     ])
     chain = prompt | llm | parser

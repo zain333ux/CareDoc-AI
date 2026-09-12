@@ -7,7 +7,8 @@ from app.agents.simplifier import simplify_summary
 from app.agents.verifier import verify_summary, verify_medications
 from app.agents.chat import answer_question
 from app.core.db import supabase
-from pydantic import BaseModel
+from app.core.translation import Language, localize_summary, source_summary
+from pydantic import BaseModel, Field
 import asyncio
 import uuid
 
@@ -17,7 +18,8 @@ router = APIRouter(prefix="/documents", tags=["Documents"])
 async def upload_document(
     file: UploadFile = File(...),
     doc_type: str = Form("discharge_summary"),
-    user_id: str = Form(...)  # In production, this comes from auth middleware
+    user_id: str = Form(...),  # In production, this comes from auth middleware
+    language: Language = Form("english"),
 ):
     if not file.filename.endswith(".pdf"):
         raise HTTPException(status_code=400, detail="Only PDF files are supported.")
@@ -75,14 +77,25 @@ async def upload_document(
             med["verification_note"] = "Verification service failed to parse output."
     
     # Run Simplifier sequentially
-    simplified_text = await simplify_summary(
-        medications={"medications": verified_medications},
-        follow_up={"follow_up": follow_up},
-        precautions={"precautions": precautions},
-        language="English"
-    )
+    if language == "urdu":
+        simplified_text = source_summary(verified_medications, follow_up, precautions)
+    else:
+        simplified_text = await simplify_summary(
+            medications={"medications": verified_medications},
+            follow_up={"follow_up": follow_up},
+            precautions={"precautions": precautions},
+            language="English"
+        )
     
-    # Run Verifier sequentially
+    localized = {}
+    if language == "urdu":
+        try:
+            localized = await localize_summary(simplified_text, verified_medications, follow_up, precautions)
+            simplified_text = localized["simplified_text"]
+        except Exception as exc:
+            raise HTTPException(status_code=502, detail="Urdu translation could not be completed safely. Please retry, or choose English.") from exc
+
+    # Verify the text actually shown to the patient, including Urdu.
     verification_result = await verify_summary(
         simplified_text=simplified_text,
         source_chunks=chunks
@@ -106,12 +119,16 @@ async def upload_document(
             "follow_up": follow_up,
             "precautions": precautions,
             "simplified_text": simplified_text,
-            "verification_flags": verification_result.dict()["flags"]
+            "verification_flags": verification_result.dict()["flags"],
+            "language": language,
+            **localized,
         }
     }
 
 class ChatRequest(BaseModel):
     query: str
+    language: Language = "english"
+    protected_terms: list[str] = Field(default_factory=list, max_length=100)
 
 @router.post("/{document_id}/chat")
 async def chat_with_document(document_id: str, request: ChatRequest):
@@ -125,17 +142,16 @@ async def chat_with_document(document_id: str, request: ChatRequest):
     if not chunks:
         # Fallback refusal if Pinecone finds nothing relevant
         refusal_msg = "Your document doesn't cover this — please check with your doctor or pharmacist."
-        if supabase:
-             supabase.table("chat_messages").insert({
-                 "document_id": document_id,
-                 "role": "assistant",
-                 "content": refusal_msg,
-                 "citations": []
-             }).execute()
-        return {"answer": refusal_msg, "citations": []}
+        if request.language == "urdu":
+            refusal_msg = "آپ کی دستاویز میں اس سوال کا جواب موجود نہیں۔ براہ کرم اپنے ڈاکٹر یا فارماسسٹ سے رجوع کریں۔"
+        return {"answer": refusal_msg, "citations": [], "is_refusal": True}
         
     # 2. Generate Answer
-    result = await answer_question(request.query, chunks)
+    try:
+        result = await answer_question(request.query, chunks, language=request.language, protected_terms=request.protected_terms)
+    except Exception as exc:
+        detail = "جواب تیار نہیں ہو سکا۔ براہ کرم دوبارہ کوشش کریں۔" if request.language == "urdu" else "Could not prepare the answer. Please try again."
+        raise HTTPException(status_code=502, detail=detail) from exc
     
     # 3. Store in Supabase
     if supabase:
@@ -159,5 +175,6 @@ async def chat_with_document(document_id: str, request: ChatRequest):
             
     return {
         "answer": result.answer,
-        "citations": result.citations
+        "citations": result.citations,
+        "is_refusal": result.is_refusal,
     }

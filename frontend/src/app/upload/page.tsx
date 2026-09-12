@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useRef } from "react";
+import { useState, useRef, useEffect } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
@@ -13,6 +13,10 @@ export default function UploadPage() {
   const [file, setFile] = useState<File | null>(null);
   const [docType, setDocType] = useState("discharge");
   const [language, setLanguage] = useState("english");
+  useEffect(() => {
+    const saved = localStorage.getItem("caredoc_language");
+    if (saved === "urdu" || saved === "english") setLanguage(saved);
+  }, []);
   const [isProcessing, setIsProcessing] = useState(false);
   
   // Progress states to show the real steps happening
@@ -61,8 +65,9 @@ export default function UploadPage() {
       formData.append("file", file);
       formData.append("doc_type", docType);
       formData.append("user_id", "test_user"); 
+      formData.append("language", language);
 
-      const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/documents/upload`, {
+      const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000"}/documents/upload`, {
         method: "POST",
         body: formData,
       });
@@ -81,7 +86,8 @@ export default function UploadPage() {
       const data = await res.json();
       
       // Store summary temporarily
-      localStorage.setItem(`doc_${data.document_id}`, JSON.stringify(data.summary));
+      localStorage.setItem(`doc_${data.document_id}`, JSON.stringify({ ...data.summary, language: data.summary.language || language, filename: file.name }));
+      localStorage.setItem("caredoc_language", language);
       
       // Navigate to the real document
       router.push(`/document/${data.document_id}`);
@@ -216,16 +222,17 @@ export default function UploadPage() {
                 </div>
 
                 <div className="space-y-3">
-                  <label className="text-sm font-semibold text-slate-800">Output Language</label>
+                  <label htmlFor="output-language" className="text-sm font-semibold text-slate-800">Output Language</label>
                   <select 
+                    id="output-language"
                     value={language} 
                     onChange={(e) => setLanguage(e.target.value)}
                     className="w-full p-4 bg-white/50 backdrop-blur-sm border border-white/40 rounded-xl text-sm font-medium text-slate-800 focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent transition-all shadow-sm"
                   >
                     <option value="english">English</option>
-                    <option value="spanish">Español (Spanish)</option>
-                    <option value="mandarin">中文 (Mandarin)</option>
+                    <option value="urdu" lang="ur">اردو (Urdu)</option>
                   </select>
+                  <p className="text-sm text-slate-600">Applies to your summary and chat. Medicine names, doses, dates, and source quotes stay as written.</p>
                 </div>
 
               </div>
