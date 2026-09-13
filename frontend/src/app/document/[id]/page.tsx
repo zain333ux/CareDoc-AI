@@ -4,7 +4,8 @@ import { useState, useEffect, Children, Fragment, cloneElement, isValidElement, 
 import { motion } from "framer-motion";
 import Link from "next/link";
 import { useParams } from "next/navigation";
-import { ArrowLeft, Volume2, AlertTriangle, Send, FileText, CornerDownRight, Loader2 } from "lucide-react";
+import { ArrowLeft, Volume2, AlertTriangle, Send, FileText, CornerDownRight, Loader2, Download } from "lucide-react";
+import { downloadMedicalSummaryPDF } from "@/lib/pdf-export";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 
@@ -35,21 +36,64 @@ export default function DocumentViewPage() {
   const [isChatLoading, setIsChatLoading] = useState(false);
   const [chatError, setChatError] = useState<string | null>(null);
   const [loadFailed, setLoadFailed] = useState(false);
+  const [docType, setDocType] = useState<string>("discharge_summary");
   const isUrdu = summaryData?.language === "urdu";
   const language = isUrdu ? "urdu" : "english";
   const t = (english: string, urdu: string) => isUrdu ? urdu : english;
 
   useEffect(() => {
-    // Load summary from localStorage
+    // 1. Try to load from localStorage first
     const saved = localStorage.getItem(`doc_${documentId}`);
     if (saved) {
       try {
-        setSummaryData(JSON.parse(saved));
+        const parsed = JSON.parse(saved);
+        setSummaryData(parsed);
+        if (parsed.doc_type) setDocType(parsed.doc_type);
+        return;
       } catch (e) {
-        console.error("Failed to parse summary");
+        console.error("Failed to parse cached summary", e);
+      }
+    }
+
+    // 2. Fetch from backend API if not in localStorage
+    const fetchDoc = async () => {
+      try {
+        const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000"}/documents/${documentId}`);
+        if (!res.ok) {
+          setLoadFailed(true);
+          return;
+        }
+        const data = await res.json();
+        if (data.summary) {
+          const fullSummary = {
+            ...data.summary,
+            filename: data.document?.file_path,
+            doc_type: data.document?.doc_type,
+            language: data.document?.original_language || "english",
+          };
+          setSummaryData(fullSummary);
+          setDocType(data.document?.doc_type || "discharge_summary");
+          localStorage.setItem(`doc_${documentId}`, JSON.stringify(fullSummary));
+        } else {
+          setLoadFailed(true);
+        }
+
+        if (data.chat_history && data.chat_history.length > 0) {
+          setChatHistory(data.chat_history.map((m: any) => ({
+            id: m.id || Date.now(),
+            role: m.role,
+            content: m.content,
+            citations: m.citations || [],
+            isRefusal: m.content?.includes("doesn't cover this")
+          })));
+        }
+      } catch (err) {
+        console.error("Failed to fetch document from API", err);
         setLoadFailed(true);
       }
-    } else setLoadFailed(true);
+    };
+
+    fetchDoc();
   }, [documentId]);
 
   const handleChatSubmit = async (e: React.FormEvent) => {
@@ -99,8 +143,21 @@ export default function DocumentViewPage() {
 
   if (!summaryData) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-background text-foreground">
-        {loadFailed ? <Link href="/upload" className="underline">Document not saved in this browser. Upload it again.</Link> : <Loader2 className="w-8 h-8 animate-spin text-primary" />}
+      <div className="min-h-screen flex flex-col items-center justify-center bg-background text-foreground gap-4 p-6">
+        {loadFailed ? (
+          <div className="text-center space-y-3">
+            <p className="text-slate-600 font-medium">This document could not be found or loaded.</p>
+            <div className="flex items-center justify-center gap-4">
+              <Link href="/history" className="text-primary font-semibold underline">View My Documents</Link>
+              <Link href="/upload" className="bg-primary text-primary-foreground px-4 py-2 rounded-lg text-sm font-medium">Upload New Document</Link>
+            </div>
+          </div>
+        ) : (
+          <div className="flex flex-col items-center gap-3">
+            <Loader2 className="w-8 h-8 animate-spin text-primary" />
+            <p className="text-sm text-slate-500">Loading document summary...</p>
+          </div>
+        )}
       </div>
     );
   }
@@ -108,7 +165,7 @@ export default function DocumentViewPage() {
   const containerVariants = {
     hidden: { opacity: 0 },
     visible: { 
-      opacity: 1,
+      opacity: 1, 
       transition: { staggerChildren: 0.1 }
     }
   };
@@ -118,24 +175,60 @@ export default function DocumentViewPage() {
     visible: { opacity: 1, y: 0, transition: { duration: 0.4 } }
   };
 
+  const isDischarge = docType === "discharge_summary" || docType === "discharge";
+
   return (
     <div lang={isUrdu ? "ur" : "en"} dir={isUrdu ? "rtl" : "ltr"} className={`min-h-screen bg-background text-foreground flex flex-col lg:h-screen ${isUrdu ? "urdu-content" : ""}`}>
       
       {/* Header */}
-      <header className="border-b border-border bg-card shrink-0">
+      <header className="border-b border-border bg-card shrink-0 print:border-none">
         <div className="max-w-7xl mx-auto px-6 min-h-16 py-2 gap-3 flex flex-wrap items-center justify-between">
-          <div className="flex items-center gap-4">
-            <Link href="/upload" aria-label={t("Upload another document", "نئی دستاویز اپ لوڈ کریں")} className="text-muted-foreground hover:text-foreground p-3 rounded-md hover:bg-muted/50 transition-colors">
+          <div className="flex items-center gap-3">
+            <Link href="/history" aria-label={t("Back to documents", "دستاویزات کی طرف واپس")} className="text-muted-foreground hover:text-foreground p-2 rounded-md hover:bg-muted/50 transition-colors print:hidden">
               <ArrowLeft className={`w-5 h-5 ${isUrdu ? "rotate-180" : ""}`} />
             </Link>
             <div className="flex items-center gap-2">
               <FileText className="w-4 h-4 text-primary" />
-              <bdi className="font-medium break-all source-text">{summaryData.filename || t("Medical document", "طبی دستاویز")}</bdi>
+              <bdi className="font-medium break-all source-text text-sm sm:text-base">{summaryData.filename || t("Medical document", "طبی دستاویز")}</bdi>
             </div>
           </div>
-          <span className="text-xs font-mono uppercase tracking-wider text-muted-foreground bg-muted/50 px-2 py-1 rounded">
-            {t("Ready · English", "تیار · اردو")}
-          </span>
+
+          <div className="flex items-center gap-2 flex-wrap">
+            <span className={`text-xs font-semibold px-2.5 py-1 rounded-full border ${
+              isDischarge 
+                ? "bg-blue-50 text-blue-700 border-blue-200" 
+                : "bg-emerald-50 text-emerald-700 border-emerald-200"
+            }`}>
+              {isDischarge 
+                ? t("Discharge Summary · Hospital instructions", "ڈسچارج خلاصہ · ہسپتال کی ہدایات")
+                : t("Prescription · Medication list", "نسخہ · ادویات کی فہرست")
+              }
+            </span>
+            <span className="text-xs font-mono uppercase tracking-wider text-muted-foreground bg-muted/50 px-2 py-1 rounded">
+              {t("Ready · English", "تیار · اردو")}
+            </span>
+            <button
+              onClick={() => {
+                try {
+                  downloadMedicalSummaryPDF(summaryData, docType);
+                } catch (e) {
+                  console.error("PDF export error", e);
+                  window.print();
+                }
+              }}
+              className="inline-flex items-center gap-1.5 bg-primary text-primary-foreground text-xs font-semibold px-3 py-1.5 rounded-lg shadow-sm hover:opacity-95 transition-all cursor-pointer print:hidden"
+              title={t("Download PDF Summary", "پی ڈی ایف سمری ڈاؤن لوڈ کریں")}
+            >
+              <Download className="w-3.5 h-3.5" />
+              <span>{t("Download PDF", "پی ڈی ایف ڈاؤن لوڈ")}</span>
+            </button>
+            <Link 
+              href="/upload" 
+              className="text-xs font-medium text-primary hover:underline px-2 py-1 print:hidden"
+            >
+              {t("+ Upload new", "+ نیا اپ لوڈ کریں")}
+            </Link>
+          </div>
         </div>
       </header>
 
@@ -143,7 +236,7 @@ export default function DocumentViewPage() {
       <main className="flex-grow lg:overflow-hidden max-w-7xl mx-auto w-full flex flex-col lg:flex-row">
         
         {/* Left Column: Summary Cards (Scrollable) */}
-        <div className="w-full min-w-0 lg:w-3/5 p-6 lg:overflow-y-auto">
+        <div className="w-full min-w-0 lg:w-3/5 p-6 lg:overflow-y-auto print:w-full print:p-0 print:overflow-visible">
           <motion.div 
             className="max-w-3xl mx-auto space-y-6 pb-12"
             variants={containerVariants}
@@ -155,9 +248,26 @@ export default function DocumentViewPage() {
             <motion.section variants={itemVariants} className="bg-card border border-border rounded-lg p-6 shadow-sm">
               <div className="flex items-center justify-between mb-4">
                 <h2 className="text-lg font-medium">{t("Plain-language Summary", "آسان زبان میں خلاصہ")}</h2>
-                <button disabled className="text-muted-foreground opacity-50 p-2 rounded-full" title={t("Read aloud is not available yet", "آواز میں سننے کی سہولت ابھی دستیاب نہیں")} aria-label={t("Read aloud is not available yet", "آواز میں سننے کی سہولت ابھی دستیاب نہیں")}>
-                  <Volume2 className="w-5 h-5" />
-                </button>
+                <div className="flex items-center gap-2 print:hidden">
+                  <button
+                    onClick={() => {
+                      try {
+                        downloadMedicalSummaryPDF(summaryData, docType);
+                      } catch (e) {
+                        console.error("PDF export error", e);
+                        window.print();
+                      }
+                    }}
+                    className="inline-flex items-center gap-1.5 text-xs font-semibold text-primary bg-primary/10 hover:bg-primary/20 px-3 py-1.5 rounded-lg transition-colors cursor-pointer"
+                    title={t("Download PDF Summary", "پی ڈی ایف سمری ڈاؤن لوڈ کریں")}
+                  >
+                    <Download className="w-3.5 h-3.5" />
+                    <span>{t("Download PDF", "پی ڈی ایف ڈاؤن لوڈ")}</span>
+                  </button>
+                  <button disabled className="text-muted-foreground opacity-50 p-2 rounded-full" title={t("Read aloud is not available yet", "آواز میں سننے کی سہولت ابھی دستیاب نہیں")} aria-label={t("Read aloud is not available yet", "آواز میں سننے کی سہولت ابھی دستیاب نہیں")}>
+                    <Volume2 className="w-5 h-5" />
+                  </button>
+                </div>
               </div>
               <div className="text-foreground leading-relaxed">
                 <ReactMarkdown 
@@ -260,7 +370,7 @@ export default function DocumentViewPage() {
         </div>
 
         {/* Right Column: Chat Interface */}
-        <div className="w-full min-w-0 shrink-0 lg:shrink lg:w-2/5 border-t lg:border-t-0 lg:border-s border-border bg-background flex flex-col h-[500px] lg:h-auto">
+        <div className="w-full min-w-0 shrink-0 lg:shrink lg:w-2/5 border-t lg:border-t-0 lg:border-s border-border bg-background flex flex-col h-[500px] lg:h-auto print:hidden">
           
           <div className="p-4 border-b border-border bg-card">
             <h3 className="font-medium">{t("Ask questions", "سوال پوچھیں")}</h3>

@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { Inter, Roboto_Mono } from "next/font/google";
 import "./globals.css";
 import RefreshRedirector from "./RefreshRedirector";
+import { AuthProvider } from "@/lib/auth-context";
 
 const inter = Inter({
   variable: "--font-sans",
@@ -14,8 +15,8 @@ const robotoMono = Roboto_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "CareDoc AI",
-  description: "Understand your healthcare paperwork.",
+  title: "CareDoc AI - Medical Document Simplifier",
+  description: "Understand your discharge summaries and prescriptions instantly.",
 };
 
 export default function RootLayout({
@@ -25,9 +26,11 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="en">
-      <body className={`${inter.variable} ${robotoMono.variable} font-sans antialiased bg-background text-foreground min-h-screen`}>
-        <RefreshRedirector />
-        {children}
+      <body className={`${inter.variable} ${robotoMono.variable} font-sans antialiased text-foreground min-h-screen relative`}>
+        <AuthProvider>
+          <RefreshRedirector />
+          {children}
+        </AuthProvider>
       </body>
     </html>
   );
