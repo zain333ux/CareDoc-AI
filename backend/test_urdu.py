@@ -6,12 +6,27 @@ from unittest.mock import AsyncMock, patch
 os.environ["PYTHON_DOTENV_DISABLED"] = "1"
 os.environ["GROQ_API_KEY"] = "test-only"
 
-from app.core.translation import protect_text, restore_text, localize_summary, source_summary
+from app.core.translation import protect_text, restore_text, localize_summary, source_summary, translate_texts, TranslatedTexts
 from types import SimpleNamespace
 from fastapi.testclient import TestClient
 
 
 class TranslationTests(unittest.IsolatedAsyncioTestCase):
+    async def test_large_translation_uses_small_batches_and_keeps_order(self):
+        import json
+        from langchain_core.runnables import RunnableLambda
+
+        def provider(prompt):
+            inputs = json.loads(prompt.messages[-1].content)
+            if len(inputs) > 4:
+                raise ValueError("Provider cannot generate this large structured response")
+            return TranslatedTexts(texts=[value.replace("days", "دن") for value in inputs])
+
+        with patch("app.agents.simplifier.llm") as llm:
+            llm.with_structured_output.return_value = RunnableLambda(provider)
+            result = await translate_texts([f"{i} days" for i in range(12)])
+        self.assertEqual(result, [f"{i} دن" for i in range(12)])
+
     def test_summary_composes_only_extracted_values(self):
         text = source_summary([{"name": "Metformin", "dosage": "500 mg", "frequency": "twice daily"}], [{"action": "Review", "when": "2026-09-20", "who": "Dr. Ali"}], [])
         self.assertIn("500 mg", text)
@@ -41,13 +56,15 @@ class TranslationTests(unittest.IsolatedAsyncioTestCase):
         meds = [{"name": "Metformin", "dosage": "500 mg", "frequency": "twice daily", "duration": "7 days", "verified": False}]
         follow = [{"action": "Review", "when": "2026-09-20", "who": "Dr. Ali"}]
         precautions = [{"warning": "Do not drive", "severity_hint": "Caution"}]
-        with patch("app.core.translation.translate_texts", new=AsyncMock(return_value=["خلاصہ", "دن میں دو بار", "7 دن", "معائنہ", "گاڑی نہ چلائیں"])):
+        with patch("app.core.translation.translate_texts", new=AsyncMock(return_value=["دن میں دو بار", "7 دن", "معائنہ", "گاڑی نہ چلائیں"])):
             result = await localize_summary("Summary", meds, follow, precautions)
         self.assertEqual(meds[0]["dosage"], "500 mg")
         self.assertNotIn("frequency_urdu", meds[0])
         self.assertEqual(result["medications"][0]["frequency_urdu"], "دن میں دو بار")
         self.assertFalse(result["medications"][0]["verified"])
         self.assertEqual(result["follow_up"][0]["when"], "2026-09-20")
+        self.assertIn("دن میں دو بار", result["simplified_text"])
+        self.assertIn("2026-09-20", result["simplified_text"])
 
 
 class LanguageApiTests(unittest.TestCase):

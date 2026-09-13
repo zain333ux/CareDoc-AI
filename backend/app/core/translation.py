@@ -41,20 +41,29 @@ class TranslatedTexts(BaseModel):
     texts: list[str]
 
 
-def source_summary(medications: list[dict], follow_up: list[dict], precautions: list[dict]) -> str:
+def source_summary(medications: list[dict], follow_up: list[dict], precautions: list[dict], language: Language = "english") -> str:
     """Compose only extracted fields, without generating additional instructions."""
     sections = []
+    urdu = language == "urdu"
     for heading, records, fields in [
-        ("Medications", medications, ("name", "dosage", "frequency", "duration")),
-        ("Follow-up", follow_up, ("action", "when", "who")),
-        ("Precautions", precautions, ("warning",)),
+        ("ادویات" if urdu else "Medications", medications, ("name", "dosage", "frequency_urdu" if urdu else "frequency", "duration_urdu" if urdu else "duration")),
+        ("اگلے معائنے کی ہدایات" if urdu else "Follow-up", follow_up, ("action_urdu" if urdu else "action", "when", "who")),
+        ("احتیاطیں" if urdu else "Precautions", precautions, ("warning_urdu" if urdu else "warning",)),
     ]:
         lines = ["- " + " · ".join(str(record[field]) for field in fields if record.get(field)) for record in records]
-        sections.append(f"## {heading}\n" + ("\n".join(lines) or "Not mentioned in the extracted information."))
+        empty = "نکالی گئی معلومات میں ذکر موجود نہیں۔" if urdu else "Not mentioned in the extracted information."
+        sections.append(f"## {heading}\n" + ("\n".join(lines) or empty))
     return "\n\n".join(sections)
 
 
 async def translate_texts(texts: list[str], protected: list[str] | None = None) -> list[str]:
+    if len(texts) > 4:
+        translated = []
+        for start in range(0, len(texts), 4):
+            translated.extend(await translate_texts(texts[start:start + 4], protected))
+        return translated
+    if not texts:
+        return []
     from langchain_core.prompts import ChatPromptTemplate
     from app.agents.simplifier import llm
 
@@ -91,16 +100,17 @@ async def translate_texts(texts: list[str], protected: list[str] | None = None) 
 async def localize_summary(text: str, medications: list[dict], follow_up: list[dict], precautions: list[dict]) -> dict:
     protected = [str(m[key]) for m in medications for key in ("name", "dosage") if m.get(key)]
     protected += [str(f[key]) for f in follow_up for key in ("when", "who") if f.get(key)]
-    values = [text]
+    values = []
     for med in medications:
         values.extend([med.get("frequency") or "", med.get("duration") or ""])
     values += [f.get("action") or "" for f in follow_up]
     values += [p.get("warning") or "" for p in precautions]
     translated = iter(await translate_texts(values, protected))
-    return {
-        "simplified_text": next(translated),
+    result = {
         "original_simplified_text": text,
         "medications": [dict(m, frequency_urdu=next(translated), duration_urdu=next(translated)) for m in medications],
         "follow_up": [dict(f, action_urdu=next(translated)) for f in follow_up],
         "precautions": [dict(p, warning_urdu=next(translated)) for p in precautions],
     }
+    result["simplified_text"] = source_summary(result["medications"], result["follow_up"], result["precautions"], language="urdu")
+    return result
