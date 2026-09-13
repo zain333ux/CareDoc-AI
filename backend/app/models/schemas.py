@@ -22,7 +22,7 @@ class FollowUpExtraction(BaseModel):
 
 class Precaution(BaseModel):
     warning: str = Field(description="The precaution, restriction, or warning sign to look out for")
-    severity_hint: str = Field(description="Implied severity (e.g., Emergency, Routine, Caution)")
+    severity_hint: Optional[str] = Field(default=None, description="Severity if stated in the source (e.g., Emergency, Routine, Caution); otherwise omit")
 
 class PrecautionExtraction(BaseModel):
     precautions: List[Precaution] = Field(default_factory=list, description="List of precautions and warnings")

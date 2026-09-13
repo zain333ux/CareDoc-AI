@@ -12,6 +12,12 @@ from fastapi.testclient import TestClient
 
 
 class TranslationTests(unittest.IsolatedAsyncioTestCase):
+    def test_precaution_without_severity_keeps_warning(self):
+        from app.models.schemas import ComprehensiveExtraction
+        result = ComprehensiveExtraction.model_validate({"precautions": [{"warning": "Do not drive if dizzy"}]})
+        self.assertEqual(result.precautions[0].warning, "Do not drive if dizzy")
+        self.assertIsNone(result.precautions[0].severity_hint)
+
     async def test_large_translation_uses_small_batches_and_keeps_order(self):
         import json
         from langchain_core.runnables import RunnableLambda
