@@ -11,6 +11,7 @@ from app.core.translation import Language, localize_summary, source_summary
 from pydantic import BaseModel, Field
 import asyncio
 import uuid
+from groq import RateLimitError
 
 router = APIRouter(prefix="/documents", tags=["Documents"])
 
@@ -40,6 +41,8 @@ async def upload_document(
         relevance_check = response.content if hasattr(response, 'content') else str(response)
         if "YES" not in relevance_check.upper():
              raise HTTPException(status_code=400, detail="This doesn't look like a medical document. Please upload a discharge summary or prescription.")
+    except RateLimitError:
+        raise
     except Exception as e:
         if isinstance(e, HTTPException):
             raise e
@@ -61,6 +64,8 @@ async def upload_document(
     # Run comprehensive extraction
     try:
         extraction_result = await extract_all(chunks)
+    except RateLimitError:
+        raise
     except Exception as exc:
         # Do not expose model output or patient data in logs or error responses.
         print(f"Document extraction failed: {type(exc).__name__}")
@@ -73,6 +78,8 @@ async def upload_document(
     # Verify medications explicitly
     try:
         verified_medications = await verify_medications(medications, chunks)
+    except RateLimitError:
+        raise
     except Exception as e:
         print(f"Medication verification failed: {e}")
         # Fallback to unverified if the LLM crashes
@@ -97,6 +104,8 @@ async def upload_document(
         try:
             localized = await localize_summary(simplified_text, verified_medications, follow_up, precautions)
             simplified_text = localized["simplified_text"]
+        except RateLimitError:
+            raise
         except Exception as exc:
             raise HTTPException(status_code=502, detail="Urdu translation could not be completed safely. Please retry, or choose English.") from exc
 
@@ -244,6 +253,8 @@ async def chat_with_document(document_id: str, request: ChatRequest):
     # 2. Generate Answer
     try:
         result = await answer_question(request.query, chunks, language=request.language, protected_terms=request.protected_terms)
+    except RateLimitError:
+        raise
     except Exception as exc:
         detail = "جواب تیار نہیں ہو سکا۔ براہ کرم دوبارہ کوشش کریں۔" if request.language == "urdu" else "Could not prepare the answer. Please try again."
         raise HTTPException(status_code=502, detail=detail) from exc

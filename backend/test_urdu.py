@@ -105,6 +105,17 @@ class LanguageApiTests(unittest.TestCase):
             from main import app
         cls.client = TestClient(app)
 
+    def test_quota_failure_stops_upload_before_storage(self):
+        import httpx
+        from groq import RateLimitError
+        error = RateLimitError("quota exhausted", response=httpx.Response(429, headers={"retry-after": "180"}, request=httpx.Request("POST", "https://api.groq.com/test")), body=None)
+        with patch("app.api.documents.extract_text_from_pdf", return_value="source"), patch("app.agents.chat.llm", SimpleNamespace(invoke=lambda p: (_ for _ in ()).throw(error))), patch("app.api.documents.process_and_store_document", side_effect=AssertionError("Must not store after quota failure")):
+            response = self.client.post("/documents/upload", files={"file": ("sample.pdf", b"test", "application/pdf")}, data={"user_id": "test", "language": "urdu"}, headers={"Origin": "https://caredoc-frontend.vercel.app"})
+        self.assertEqual(response.status_code, 429)
+        self.assertEqual(response.headers["retry-after"], "180")
+        self.assertIn("limit", response.json()["detail"])
+        self.assertIn("access-control-allow-origin", response.headers)
+
     def test_extraction_failure_is_readable_cross_origin(self):
         from langchain_core.exceptions import OutputParserException
         with patch("app.api.documents.extract_text_from_pdf", return_value="source"), patch("app.agents.chat.llm", SimpleNamespace(invoke=lambda p: SimpleNamespace(content="YES"))), patch("app.api.documents.process_and_store_document", return_value=["source"]), patch("app.api.documents.extract_all", AsyncMock(side_effect=OutputParserException("invalid model output"))):
