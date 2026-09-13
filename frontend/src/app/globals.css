@@ -130,11 +130,12 @@
   }
   body {
     @apply text-foreground;
-    background-image: url('/bg-doctor.jpg');
-    background-size: cover;
-    background-position: center;
-    background-attachment: fixed;
-    background-repeat: no-repeat;
+    background-image: url('/bg-doctor.jpg') !important;
+    background-size: cover !important;
+    background-position: center top !important;
+    background-attachment: fixed !important;
+    background-repeat: no-repeat !important;
+    min-height: 100vh;
   }
   html {
     @apply font-sans;

@@ -3,8 +3,11 @@ backend/venv/
 backend/.venv/
 backend/env/
 backend/.env
-backend/__pycache__/
-backend/*.pyc
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.pyc
 
 # Node
 frontend/node_modules/
