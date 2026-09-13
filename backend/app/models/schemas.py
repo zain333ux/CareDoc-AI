@@ -1,4 +1,5 @@
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, StringConstraints
+from typing import Annotated
 from typing import List, Optional
 
 class Medication(BaseModel):
@@ -13,9 +14,9 @@ class MedicationExtraction(BaseModel):
     medications: List[Medication] = Field(default_factory=list, description="List of extracted medications")
 
 class FollowUp(BaseModel):
-    action: str = Field(description="The action to take (e.g., Schedule an appointment, get a blood test)")
-    when: str = Field(description="When the action should happen (e.g., in 2 weeks, next Monday)")
-    who: str = Field(description="Who to see or contact (e.g., Dr. Smith, Primary Care Provider)")
+    action: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1)] = Field(description="The action to take; never return an empty follow-up entry")
+    when: Optional[str] = Field(default=None, description="When the action should happen, only if specified in the source")
+    who: Optional[str] = Field(default=None, description="Who to see or contact, only if specified in the source")
 
 class FollowUpExtraction(BaseModel):
     follow_up: List[FollowUp] = Field(default_factory=list, description="List of follow-up instructions")

@@ -59,7 +59,12 @@ async def upload_document(
         
     # 4. Agent Orchestration
     # Run comprehensive extraction
-    extraction_result = await extract_all(chunks)
+    try:
+        extraction_result = await extract_all(chunks)
+    except Exception as exc:
+        # Do not expose model output or patient data in logs or error responses.
+        print(f"Document extraction failed: {type(exc).__name__}")
+        raise HTTPException(status_code=502, detail="Could not read the medical instructions reliably. Please retry the upload.") from exc
     
     medications = extraction_result.dict()["medications"]
     follow_up = extraction_result.dict()["follow_up"]

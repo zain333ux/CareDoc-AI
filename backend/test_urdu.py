@@ -12,6 +12,30 @@ from fastapi.testclient import TestClient
 
 
 class TranslationTests(unittest.IsolatedAsyncioTestCase):
+    async def test_extraction_retries_invalid_follow_up(self):
+        from langchain_core.runnables import RunnableLambda
+        from langchain_core.messages import AIMessage
+        from app.agents.specialists import extract_all
+        responses = iter([
+            '{"follow_up":[{"action":""}]}',
+            '{"follow_up":[{"action":"Review blood test","when":"Monday","who":"Dr. Ali"}]}',
+        ])
+        with patch("app.agents.specialists.llm", RunnableLambda(lambda _: AIMessage(content=next(responses)))):
+            result = await extract_all(["Review blood test Monday with Dr. Ali"])
+        self.assertEqual(result.follow_up[0].action, "Review blood test")
+
+    def test_follow_up_can_omit_unspecified_date_and_provider(self):
+        from app.models.schemas import FollowUp
+        result = FollowUp(action="Arrange a follow-up")
+        self.assertIsNone(result.when)
+        self.assertIsNone(result.who)
+
+    def test_empty_follow_up_rejected(self):
+        from app.models.schemas import FollowUp
+        from pydantic import ValidationError
+        with self.assertRaises(ValidationError):
+            FollowUp(action="   ", when="Monday", who="Doctor")
+
     def test_precaution_without_severity_keeps_warning(self):
         from app.models.schemas import ComprehensiveExtraction
         result = ComprehensiveExtraction.model_validate({"precautions": [{"warning": "Do not drive if dizzy"}]})
@@ -80,6 +104,14 @@ class LanguageApiTests(unittest.TestCase):
             pc.return_value.list_indexes.return_value.names.return_value = ["caredoc-index"]
             from main import app
         cls.client = TestClient(app)
+
+    def test_extraction_failure_is_readable_cross_origin(self):
+        from langchain_core.exceptions import OutputParserException
+        with patch("app.api.documents.extract_text_from_pdf", return_value="source"), patch("app.agents.chat.llm", SimpleNamespace(invoke=lambda p: SimpleNamespace(content="YES"))), patch("app.api.documents.process_and_store_document", return_value=["source"]), patch("app.api.documents.extract_all", AsyncMock(side_effect=OutputParserException("invalid model output"))):
+            response = self.client.post("/documents/upload", files={"file": ("sample.pdf", b"test", "application/pdf")}, data={"user_id": "test", "language": "urdu"}, headers={"Origin": "https://caredoc-frontend.vercel.app"})
+        self.assertEqual(response.status_code, 502)
+        self.assertIn("detail", response.json())
+        self.assertIn("access-control-allow-origin", response.headers)
 
     def test_invalid_chat_language_rejected(self):
         response = self.client.post("/documents/test/chat", json={"query": "hello", "language": "spanish"})
